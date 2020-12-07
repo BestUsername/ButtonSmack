@@ -14,86 +14,111 @@
 #define CLK_PIN    13
 #define DATA_PIN   11
 #define CS_PIN     10
-MD_Parola P = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+MD_Parola Display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
-
-long randNumber;
 int step_counter = 0;
-int button_values[] = {913, 429, 267, 179, 110};
-int btn_tol = 20;
-int analogValue = 0;
-int pin_p1 = A0;
-int leds_cnt = 5;
-int p1_leds[5] = {2,3,4,5,6};
-int p1_score = 0;
+
+const int leds_cnt = 5;
+int p1_leds[leds_cnt] = {2,3,4,5,6};
+int p1_buttons[leds_cnt] = {A0, A1, A2, A3, A4};
+
 int action_speed = 2000;
 int action_speed_min = 250;
+
+bool playing = false;
+int p1_score = 0;
 
 void setup() {
   Serial.begin(9600);
 
   randomSeed(analogRead(A7));
 
-  pinMode(pin_p1, INPUT);
-
   for (int i = 0; leds_cnt > i; i++) {
+    pinMode(p1_buttons[i], INPUT);
     pinMode(p1_leds[i], OUTPUT);
   }
 
-  P.begin(MAX_ZONES);
-  P.setZone(0,0,3);
-  P.displayZoneText(0, "Hi Score", PA_CENTER, 100, 0, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+  Display.begin(MAX_ZONES);
+  Display.setZone(0,0,3);
+  Display.displayZoneText(0, "Hi Score", PA_CENTER, 100, 100, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+
+  startGame();
+}
+
+void startGame() {
+  playing = true;
+  p1_score = 0;
+  for (int i = 0; i < leds_cnt; ++i) {
+    digitalWrite(p1_leds[i], LOW);
+  }
+  step_counter = 0;
+}
+
+void endGame() {
+  playing = false;
+  
+}
+
+void resetGame() {
+  endGame();
+  startGame();
 }
 
 void loop() {
-  if(p1_score < 100) {
-    step_counter++;
-    bool step_action = false;
-    if (step_counter > action_speed) {
-      step_counter = 0;
-      step_action = true;
-      action_speed = action_speed - round(action_speed/50);
-      if (action_speed < action_speed_min) {
-        action_speed = action_speed_min;
-      }
-      Serial.println(action_speed);
-    }
-
-    if (step_action) {
-      int pin_light = random(0,5);
-      digitalWrite(p1_leds[pin_light], HIGH);
-
-    }
-
-    analogValue = analogRead(pin_p1);
-    for (int i = 0; leds_cnt > i; i++) {
-      if ( analogValue < button_values[i] + btn_tol and analogValue > button_values[i] - btn_tol ){
-        if(digitalRead(p1_leds[i]) == HIGH){
-          digitalWrite(p1_leds[i], LOW);
-          p1_score++;
+  if (digitalRead(A5) == HIGH) {
+    resetGame();
+  }
+  if(playing) {
+    if(p1_score < 100) {
+      step_counter++;
+      bool step_action = false;
+      if (step_counter > action_speed) {
+        step_counter = 0;
+        step_action = true;
+        action_speed = action_speed - round(action_speed/50);
+        if (action_speed < action_speed_min) {
+          action_speed = action_speed_min;
         }
       }
-    }
 
-    if ( step_counter % 100 == 0){
+      if (step_action) {
+        int pin_light = random(0,5);
+        digitalWrite(p1_leds[pin_light], HIGH);
+  
+      }
+
+      for (int i = 0; i < leds_cnt; ++i) {
+        if (digitalRead(p1_buttons[i]) == HIGH) {
+          if(digitalRead(p1_leds[i]) == HIGH){
+            digitalWrite(p1_leds[i], LOW);
+            p1_score++;
+          } 
+        }
+      }
+
+      if ( step_counter % 100 == 0){
+        char Score1[80];
+        sprintf(Score1, "%d", p1_score);
+        char *chrdisp[] = {Score1};
+  
+        Display.displayZoneText(0, chrdisp[0], PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      }
+    } else {
       char Score1[80];
       sprintf(Score1, "%d", p1_score);
       char *chrdisp[] = {Score1};
-
-      P.displayZoneText(0, chrdisp[0], PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      Display.displayZoneText(0, chrdisp[0], PA_CENTER, 100, 100, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
     }
   } else {
-    char Score1[80];
-    sprintf(Score1, "%d", p1_score);
-    char *chrdisp[] = {Score1};
-    P.displayZoneText(0, chrdisp[0], PA_CENTER, 100, 0, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+    //not playing
   }
 
-  if (P.displayAnimate()) {
+  // regardless if playing or not, update the display windows
+  if (Display.displayAnimate()) {
     for (uint8_t i=0; i<MAX_ZONES; i++) {
-      if (P.getZoneStatus(i)) {
+      if (Display.getZoneStatus(i)) {
         // do something with the parameters for the animation then reset it
-        P.displayReset(i);
+        Display.displayReset(i);
       }
     }
   }
