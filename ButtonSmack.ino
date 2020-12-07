@@ -18,6 +18,9 @@ MD_Parola Display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
 int step_counter = 0;
 
+int reset_led = 7;
+int reset_button = A5;
+
 const int leds_cnt = 5;
 int p1_leds[leds_cnt] = {2,3,4,5,6};
 int p1_buttons[leds_cnt] = {A0, A1, A2, A3, A4};
@@ -33,15 +36,24 @@ void setup() {
 
   randomSeed(analogRead(A7));
 
+  pinMode(reset_led, OUTPUT);
+  pinMode(reset_button, INPUT);  
   for (int i = 0; leds_cnt > i; i++) {
     pinMode(p1_buttons[i], INPUT);
     pinMode(p1_leds[i], OUTPUT);
   }
 
+  digitalWrite(reset_led, HIGH);
+
   Display.begin(MAX_ZONES);
   Display.setZone(0,0,3);
   Display.displayZoneText(0, "Hi Score", PA_CENTER, 100, 100, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
 
+  resetGame();
+}
+
+void resetGame() {
+  endGame();
   startGame();
 }
 
@@ -59,13 +71,8 @@ void endGame() {
   
 }
 
-void resetGame() {
-  endGame();
-  startGame();
-}
-
 void loop() {
-  if (digitalRead(A5) == HIGH) {
+  if (digitalRead(reset_button) == HIGH) {
     resetGame();
   }
   if(playing) {
