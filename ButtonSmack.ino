@@ -11,19 +11,21 @@
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW
 #define MAX_DEVICES 4 // number of 8x8 panels connected together
 #define MAX_ZONES   1 // Max number of zones to use (each grouping of panels can be split into virtual zones)
-#define CLK_PIN    13
+
 #define DATA_PIN   11
 #define CS_PIN     10
+#define CLK_PIN    13
+
 MD_Parola Display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
 int step_counter = 0;
 
 int reset_led = 7;
-int reset_button = A5;
+int reset_button = A0;
 
 const int leds_cnt = 5;
 int p1_leds[leds_cnt] = {2,3,4,5,6};
-int p1_buttons[leds_cnt] = {A0, A1, A2, A3, A4};
+int p1_buttons[leds_cnt] = {A5, A4, A3, A2, A1};
 
 int action_speed = 2000;
 int action_speed_min = 250;
@@ -33,6 +35,7 @@ int p1_score = 0;
 
 void setup() {
   Serial.begin(9600);
+  Serial.println("Starting System");
 
   randomSeed(analogRead(A7));
 
@@ -58,6 +61,7 @@ void resetGame() {
 }
 
 void startGame() {
+  Serial.println("Start Game");
   playing = true;
   p1_score = 0;
   for (int i = 0; i < leds_cnt; ++i) {
@@ -67,6 +71,7 @@ void startGame() {
 }
 
 void endGame() {
+  Serial.println("End Game");
   playing = false;
   
 }
