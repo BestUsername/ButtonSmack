@@ -1,7 +1,7 @@
 // IMPORTANT!
 // DOWNLOAD the MD_Parola library
 // https://github.com/MajicDesigns/MD_Parola
-
+#include <avr/eeprom.h>
 
 #include <stdio.h>
 #include <MD_Parola.h>
@@ -33,7 +33,8 @@ int action_speed_min = 250;
 bool playing = false;
 int p1_score = 0;
 
-int high_score = 0;
+uint16_t high_score = 0;
+uint16_t* high_score_address = 0;
 
 bool resetHeld = false;
 unsigned long gameStartTime;
@@ -61,6 +62,9 @@ void setup() {
   // hold centre button while turning on to reset the Hi Score
   if (digitalRead(centre_button) == HIGH) {
     setHiScore(0);
+  } else {
+    // load high score from EEPROM
+    high_score = eeprom_read_word(high_score_address);
   }
 
   // starting state
@@ -118,6 +122,7 @@ void endGame() {
 void setHiScore(int score) {
   Serial.println("Writing High Score");
   high_score = score;
+  eeprom_write_word(high_score_address, high_score);
 }
 
 void loop() {
