@@ -71,6 +71,27 @@ void setup() {
   idle();
 }
 
+/* Get a LED index that we can light up.
+ *  Avoid LEDS that are already lit, as well as LEDS where the associated button is pressed.
+ *  If nothing suitable can be found, return -1.
+ */
+int getRandomUnlitUnpressedIndex() {
+  int result = -1; // result of -1 means all lights are lit
+  
+  size_t unlit_cnt = 0;
+  int unlit_leds[leds_cnt];
+  for (int i = 0; i < leds_cnt; ++i) {
+    if(digitalRead(p1_leds[i]) == LOW && digitalRead(p1_buttons[i]) == LOW){
+      unlit_leds[unlit_cnt] = i;
+      ++unlit_cnt;
+    }
+  }
+  if (unlit_cnt > 0) {
+    result = random(0,unlit_cnt-1);
+  }
+  return result;
+}
+
 void idle() {
   playing = false;
   // high score display
@@ -154,14 +175,16 @@ void loop() {
       }
 
       if (step_action) {
-        int pin_light = random(0,5);
-        digitalWrite(p1_leds[pin_light], HIGH);
-  
+        int pin_light = getRandomUnlitUnpressedIndex();
+        if (pin_light >= 0) {
+          digitalWrite(p1_leds[pin_light], HIGH);  
+        } else {
+          // TODO - alter timer for faster next attempt?
+        }
       }
 
       for (int i = 0; i < leds_cnt; ++i) {
-        if (digitalRead(p1_buttons[i]) == HIGH) {
-          if(digitalRead(p1_leds[i]) == HIGH){
+        if (digitalRead(p1_buttons[i]) == HIGH && digitalRead(p1_leds[i]) == HIGH){
             digitalWrite(p1_leds[i], LOW);
             p1_score++;
           } 
