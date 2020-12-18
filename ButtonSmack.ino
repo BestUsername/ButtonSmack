@@ -129,7 +129,6 @@ void startGame() {
 
 void endGame() {
   Serial.println("End Game");
-  lowLight();
   playing = false;
 
   if (p1_score > high_score) {
@@ -147,14 +146,6 @@ void setHiScore(int score) {
 }
 
 void loop() {
-  // only reset when releasing the button to prevent multiple calls while held down.
-  if (resetHeld == true && digitalRead(reset_button) == LOW) {
-    resetHeld = false;
-    startGame();
-  } else if (digitalRead(reset_button) == HIGH && !resetHeld) {
-    resetHeld = true;
-  }
-
   // main game logic
   if(playing) {
     // update timer
@@ -164,17 +155,12 @@ void loop() {
 
       //
       step_counter++;
-      bool step_action = false;
       if (step_counter > action_speed) {
         step_counter = 0;
-        step_action = true;
         action_speed = action_speed - round(action_speed/50);
         if (action_speed < action_speed_min) {
           action_speed = action_speed_min;
         }
-      }
-
-      if (step_action) {
         int pin_light = getRandomUnlitUnpressedIndex();
         if (pin_light >= 0) {
           digitalWrite(p1_leds[pin_light], HIGH);  
@@ -184,13 +170,12 @@ void loop() {
       }
 
       for (int i = 0; i < leds_cnt; ++i) {
-        if (digitalRead(p1_buttons[i]) == HIGH && digitalRead(p1_leds[i]) == HIGH){
+        if (digitalRead(p1_buttons[i]) == HIGH && digitalRead(p1_leds[i]) == HIGH) {
             digitalWrite(p1_leds[i], LOW);
             p1_score++;
-          } 
         }
       }
-
+      
       if ( step_counter % 100 == 0){
         // update timer display
         snprintf(timerBuffer, timerBufferLength, "%d", counter/1000);
@@ -200,11 +185,18 @@ void loop() {
         snprintf(scoreBuffer, scoreBufferLength, "%d", p1_score);
         Display.displayZoneText(0, scoreBuffer, PA_RIGHT, 0, 0, PA_PRINT);
       }
-    } else {
+    } else { // game timer finished
       endGame();
     }
   } else {
-    //not playing - idle animation?
+    // only reset when releasing the button to prevent multiple calls while held down.
+    if (resetHeld == true && digitalRead(reset_button) == LOW) {
+      resetHeld = false;
+      startGame();
+    } else if (digitalRead(reset_button) == HIGH && !resetHeld) {
+      resetHeld = true;
+    }
+    // TODO idle animation
   }
 
   // regardless if playing or not, update the display windows
