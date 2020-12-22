@@ -26,9 +26,12 @@ const int leds_cnt = 5;
 int p1_leds[leds_cnt] = {2,3,4,5,6};
 int p1_buttons[leds_cnt] = {A5, A4, A3, A2, A1};
 
-int step_counter = 0;
-int action_speed = 2000;
-int action_speed_min = 250;
+unsigned long p1_led_times[leds_cnt];
+unsigned long led_activation_length = 2000; 
+
+unsigned long activation_timestamp = 0;
+unsigned long activation_min = 100;
+unsigned long activation_max = 600;
 
 bool playing = false;
 int p1_score = 0;
@@ -61,8 +64,10 @@ void setup() {
 
   // hold centre button while turning on to reset the Hi Score
   if (digitalRead(centre_button) == HIGH) {
+    Serial.println("CENTRE BUTTON HIGH");
     setHiScore(0);
   } else {
+    Serial.println("CENTRE BUTTON LOW");
     // load high score from EEPROM
     high_score = eeprom_read_word(high_score_address);
   }
@@ -122,9 +127,9 @@ void startGame() {
   digitalWrite(reset_led, LOW);
  
   p1_score = 0;
-  step_counter = 0;
   playing = true;
   gameStartTime = millis();
+  activation_timestamp = gameStartTime + activation_max;
 }
 
 void endGame() {
@@ -146,45 +151,51 @@ void setHiScore(int score) {
 }
 
 void loop() {
+  unsigned long currentTime = millis();
   // main game logic
   if(playing) {
     // update timer
-    unsigned long counter = millis() - gameStartTime;
+    unsigned long counter = currentTime - gameStartTime;
     if (counter <= gameLength) { // prevent going negative on unsigned, while also checking if the game has ended
       counter = gameLength - counter;
 
-      //
-      step_counter++;
-      if (step_counter > action_speed) {
-        step_counter = 0;
-        action_speed = action_speed - round(action_speed/50);
-        if (action_speed < action_speed_min) {
-          action_speed = action_speed_min;
-        }
+      // see about lighting up a button
+      if (activation_timestamp <= currentTime) {
         int pin_light = getRandomUnlitUnpressedIndex();
         if (pin_light >= 0) {
-          digitalWrite(p1_leds[pin_light], HIGH);  
+          digitalWrite(p1_leds[pin_light], HIGH);
+          p1_led_times[pin_light] = currentTime;
+          // set up next timer
+          activation_timestamp = currentTime + random(activation_min, activation_max);
         } else {
-          // TODO - alter timer for faster next attempt?
+          // alter timer for faster next attempt
+          activation_timestamp = currentTime + activation_min;
         }
       }
 
+      // check button presses
       for (int i = 0; i < leds_cnt; ++i) {
         if (digitalRead(p1_buttons[i]) == HIGH && digitalRead(p1_leds[i]) == HIGH) {
             digitalWrite(p1_leds[i], LOW);
             p1_score++;
+        } else if (digitalRead(p1_leds[i]) == HIGH && currentTime - p1_led_times[i] >= led_activation_length) {
+          // light timed out. remove it and reduce points
+          digitalWrite(p1_leds[i], LOW);
+          p1_score--;
+          if (p1_score < 0) {
+            p1_score = 0;
+          }
         }
       }
-      
-      if ( step_counter % 100 == 0){
-        // update timer display
+
+      // update displays
+        // timer
         snprintf(timerBuffer, timerBufferLength, "%d", counter/1000);
         Display.displayZoneText(1, timerBuffer, PA_CENTER, 0, 0, PA_PRINT);
   
-        // update score display
+        // score
         snprintf(scoreBuffer, scoreBufferLength, "%d", p1_score);
         Display.displayZoneText(0, scoreBuffer, PA_RIGHT, 0, 0, PA_PRINT);
-      }
     } else { // game timer finished
       endGame();
     }
