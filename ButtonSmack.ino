@@ -66,6 +66,27 @@ State* g_state_pregame = g_machine.addState(&s_pregame);
 State* g_state_play = g_machine.addState(&s_play);
 State* g_state_end = g_machine.addState(&s_end);
 
+
+#ifdef __arm__
+// should use uinstd.h to define sbrk but Due causes a conflict
+extern "C" char* sbrk(int incr);
+#else  // __ARM__
+extern char *__brkval;
+#endif  // __arm__
+ 
+int freememory() {
+  char top;
+#ifdef __arm__
+  return &top - reinterpret_cast<char*>(sbrk(0));
+#elif defined(CORE_TEENSY) || (ARDUINO > 103 && ARDUINO != 151)
+  return &top - __brkval;
+#else  // __arm__
+  return __brkval ? &top - __brkval : &top - __malloc_heap_start;
+#endif  // __arm__
+}
+
+void(* resetFunc) (void) = 0;//declare reset function at address 0
+
 /* Get a LED index that we can light up.
  *  Avoid LEDS that are already lit, as well as LEDS where the associated button is pressed.
  *  If nothing suitable can be found, return -1.
@@ -138,15 +159,16 @@ void setup() {
 void loop() {
   g_machine.run();
   updateDisplays();
+  //Serial.println(freememory());
 }
 
 void s_idle() {
   if(g_machine.executeOnce){
-    Serial.println(F("1 State Idle"));
+    Serial.println(F("State Idle"));
     g_reset_held = false; // shouldn't need this, but JIC
     
     // high score display
-    g_display.begin(MAX_ZONES);
+    g_display.begin(2);
     g_display.setZone(0,0,2);
     g_display.setZone(1,3,3);
     snprintf(g_score_buffer, g_score_buffer_length, "%d", g_high_score);
@@ -170,7 +192,7 @@ void s_idle() {
 void s_pregame() {
   unsigned long current_time = millis();
   if (g_machine.executeOnce) {
-    Serial.println(F("2 State Pregame"));
+    Serial.println(F("State Pregame"));
     g_display.begin(1);
     g_display.setZone(0,0,4);
 
@@ -197,7 +219,7 @@ void s_pregame() {
 void s_play() {
   unsigned long current_time = millis();
   if (g_machine.executeOnce) {
-    Serial.println(F("3 State Play"));
+    Serial.println(F("State Play"));
     g_display.begin(2);
     g_display.setZone(0,0,1);
     g_display.setZone(1,2,3);
@@ -258,11 +280,12 @@ void s_play() {
 
 void s_end() {
   if (g_machine.executeOnce) {
-    Serial.println(F("4 State End"));
+    Serial.println(F("State End"));
     //check if high score needs to be saved
     if (g_score > g_high_score) {
       setHiScore(g_score);
     }
   }
   g_machine.transitionTo(g_state_idle);
+  resetFunc(); //call reset 
 }
