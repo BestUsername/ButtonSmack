@@ -45,15 +45,15 @@ unsigned long g_activation_timestamp = 0;
 unsigned long g_activation_min = 100;
 unsigned long g_activation_max = 600;
 
-bool playing = false;
 int g_score = 0;
 
 uint16_t g_high_score = 0;
 uint16_t* g_high_score_address = 0;
 
 bool g_reset_held = false;
-unsigned long g_game_start_time;
+unsigned long g_state_start_time;
 const unsigned long g_game_length = 30000;
+const unsigned long g_pregame_length = 4000;
 
 const int g_score_buffer_length = 4;
 char g_score_buffer[g_score_buffer_length];
@@ -61,7 +61,8 @@ const int g_timer_buffer_length = 3;
 char g_timer_buffer[g_timer_buffer_length];
 
 StateMachine g_machine = StateMachine();
-State* g_state_idle = g_machine.addState(&s_idle); // being first should make it the default state
+State* g_state_idle = g_machine.addState(&s_idle); // being first makes it the default state
+State* g_state_pregame = g_machine.addState(&s_pregame);
 State* g_state_play = g_machine.addState(&s_play);
 State* g_state_end = g_machine.addState(&s_end);
 
@@ -93,14 +94,9 @@ void lowLight() {
 }
 
 void setHiScore(int score) {
-  Serial.println("Writing High Score");
+  Serial.println(F("Writing High Score"));
   g_high_score = score;
   eeprom_write_word(g_high_score_address, g_high_score);
-}
-
-void loop() {
-  g_machine.run();
-  updateDisplays();
 }
 
 void updateDisplays() {
@@ -117,7 +113,7 @@ void updateDisplays() {
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("Setup System");
+  Serial.println(F("Setup System"));
   randomSeed(analogRead(A7));
 
   // setup up pin modes for buttons and LEDs
@@ -130,36 +126,24 @@ void setup() {
 
   // hold centre button while turning on to reset the Hi Score
   if (digitalRead(g_centre_button) == HIGH) {
-    Serial.println("CENTRE BUTTON HIGH");
+    Serial.println(F("Resetting High Score"));
     setHiScore(0);
   } else {
-    Serial.println("CENTRE BUTTON LOW");
     // load high score from EEPROM
+    Serial.println(F("Loading High Score from EEPROM"));
     g_high_score = eeprom_read_word(g_high_score_address);
   }
-
-  /*
-  g_state_idle->addTransition(&t_idle_play, g_state_play);
-  g_state_play->addTransition(&t_play_end, g_state_end);
-  g_state_end->addTransition(&t_end_idle, g_state_idle);
-  */
-}
-/*
-bool t_idle_play() {
-  if (start button detected)
 }
 
-bool t_play_end() {
-  if (game timer ends)
+void loop() {
+  g_machine.run();
+  updateDisplays();
 }
 
-bool t_end_idle() {
-  if (end_message_finished)
-}
-*/
 void s_idle() {
   if(g_machine.executeOnce){
-    Serial.println("State Idle");
+    Serial.println(F("1 State Idle"));
+    g_reset_held = false; // shouldn't need this, but JIC
     
     // high score display
     g_display.begin(MAX_ZONES);
@@ -174,19 +158,46 @@ void s_idle() {
 
   // only reset when releasing the button to prevent multiple calls while held down.
   if (g_reset_held == true && digitalRead(g_reset_button) == LOW) {
-    Serial.println("RESET BUTTON UP");
+    Serial.println(F("Start Button triggered"));
     g_reset_held = false;
-    g_machine.transitionTo(g_state_play);
+    g_machine.transitionTo(g_state_pregame);
   } else if (digitalRead(g_reset_button) == HIGH && !g_reset_held) {
-    Serial.println("RESET BUTTON DOWN");
     g_reset_held = true;
   }
   // TODO idle animation
 }
 
-void s_play() {
+void s_pregame() {
+  unsigned long current_time = millis();
   if (g_machine.executeOnce) {
-    Serial.println("State Play");
+    Serial.println(F("2 State Pregame"));
+    g_display.begin(1);
+    g_display.setZone(0,0,4);
+
+    // set the mood
+    lowLight();
+    digitalWrite(g_reset_led, LOW);
+
+    g_state_start_time = current_time;
+  }
+
+  unsigned long counter = current_time - g_state_start_time;
+  if ((counter + 1000) < g_pregame_length) {
+    snprintf(g_timer_buffer, g_timer_buffer_length, "%d", (g_pregame_length - counter)/1000);
+    g_display.displayZoneText(0, g_timer_buffer, PA_CENTER, 0, 0, PA_PRINT);
+  } else if (counter < g_pregame_length) {
+    snprintf(g_timer_buffer, g_timer_buffer_length, "GO");
+    g_display.displayZoneText(0, g_timer_buffer, PA_CENTER, 0, 0, PA_PRINT);
+  } else {
+    // timer over: start the game
+    g_machine.transitionTo(g_state_play);
+  }
+}
+
+void s_play() {
+  unsigned long current_time = millis();
+  if (g_machine.executeOnce) {
+    Serial.println(F("3 State Play"));
     g_display.begin(2);
     g_display.setZone(0,0,1);
     g_display.setZone(1,2,3);
@@ -195,13 +206,12 @@ void s_play() {
     digitalWrite(g_reset_led, LOW);
  
     g_score = 0;
-    playing = true;
-    g_game_start_time = millis();
-    g_activation_timestamp = g_game_start_time + g_activation_max;
+    g_state_start_time = current_time;
+    g_activation_timestamp = g_state_start_time + g_activation_max;
   }
-  unsigned long current_time = millis();
+  
   // update timer
-  unsigned long counter = current_time - g_game_start_time;
+  unsigned long counter = current_time - g_state_start_time;
   if (counter <= g_game_length) { // prevent going negative on unsigned, while also checking if the game has ended
     counter = g_game_length - counter;
 
@@ -248,11 +258,11 @@ void s_play() {
 
 void s_end() {
   if (g_machine.executeOnce) {
-    Serial.println("State End");
+    Serial.println(F("4 State End"));
     //check if high score needs to be saved
-    if (g_score >= g_high_score) {
+    if (g_score > g_high_score) {
+      setHiScore(g_score);
     }
   }
-  //if (message done)
   g_machine.transitionTo(g_state_idle);
 }
