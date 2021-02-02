@@ -1,13 +1,25 @@
-// IMPORTANT!
-// DOWNLOAD the MD_Parola library
-// https://github.com/MajicDesigns/MD_Parola
+/* 
+ *  -=IMPORTANT LIBRARY INFORMATION=-
+ *  MD_Parola:
+ *    get from library management or https://github.com/MajicDesigns/MD_Parola
+ *  MD_MAX72XX (MD_Parola dependency):
+ *    get from library management
+ *  StateMachine:
+ *    if you get it from library management, patch according to https://github.com/jrullan/StateMachine/pull/8/files/fc4ca5e9861a15853804068d87880fedaea50da8
+ *    or get from the git repo from the link
+ *  LinkedList (StateMachine dependency):
+ *    if you get it from library management, patch according to https://github.com/ivanseidel/LinkedList/issues/33#issuecomment-585125344
+ *    or get from the git repo from the link
+ */
+
 #include <avr/eeprom.h>
 
 #include <stdio.h>
 #include <MD_Parola.h>
 #include <MD_MAX72xx.h>
 #include <SPI.h>
-//#include "Parola_Fonts_data.h"
+#include <StateMachine.h>
+
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW
 #define MAX_DEVICES 4 // number of 8x8 panels connected together
 #define MAX_ZONES   2 // Max number of zones to use (each grouping of panels can be split into virtual zones)
@@ -16,65 +28,42 @@
 #define CS_PIN     10
 #define CLK_PIN    13
 
-MD_Parola Display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+MD_Parola g_display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
-int reset_led = 7;
-int reset_button = A0;
-int centre_button = A1; // used to clear EEPROM on startup
+int g_reset_led = 7;
+int g_reset_button = A0;
+int g_centre_button = A1; // used to clear EEPROM on startup
 
-const int leds_cnt = 5;
-int p1_leds[leds_cnt] = {2,3,4,5,6};
-int p1_buttons[leds_cnt] = {A5, A4, A3, A2, A1};
+const int g_leds_cnt = 5;
+int g_leds[g_leds_cnt] = {2,3,4,5,6};
+int g_buttons[g_leds_cnt] = {A5, A4, A3, A2, A1};
 
-unsigned long p1_led_times[leds_cnt];
-unsigned long led_activation_length = 2000; 
+unsigned long g_led_times[g_leds_cnt];
+unsigned long g_led_activation_length = 2000; 
 
-unsigned long activation_timestamp = 0;
-unsigned long activation_min = 100;
-unsigned long activation_max = 600;
+unsigned long g_activation_timestamp = 0;
+unsigned long g_activation_min = 100;
+unsigned long g_activation_max = 600;
 
 bool playing = false;
-int p1_score = 0;
+int g_score = 0;
 
-uint16_t high_score = 0;
-uint16_t* high_score_address = 0;
+uint16_t g_high_score = 0;
+uint16_t* g_high_score_address = 0;
 
-bool resetHeld = false;
-unsigned long gameStartTime;
-const unsigned long gameLength = 30000;
+bool g_reset_held = false;
+unsigned long g_game_start_time;
+const unsigned long g_game_length = 30000;
 
-const int scoreBufferLength = 4;
-char scoreBuffer[scoreBufferLength];
-const int timerBufferLength = 3;
-char timerBuffer[timerBufferLength];
+const int g_score_buffer_length = 4;
+char g_score_buffer[g_score_buffer_length];
+const int g_timer_buffer_length = 3;
+char g_timer_buffer[g_timer_buffer_length];
 
-void setup() {
-  Serial.begin(9600);
-  Serial.println("Setup System");
-
-  randomSeed(analogRead(A7));
-
-  // setup up pin modes for buttons and LEDs
-  pinMode(reset_led, OUTPUT);
-  pinMode(reset_button, INPUT);  
-  for (int i = 0; leds_cnt > i; i++) {
-    pinMode(p1_buttons[i], INPUT);
-    pinMode(p1_leds[i], OUTPUT);
-  }
-
-  // hold centre button while turning on to reset the Hi Score
-  if (digitalRead(centre_button) == HIGH) {
-    Serial.println("CENTRE BUTTON HIGH");
-    setHiScore(0);
-  } else {
-    Serial.println("CENTRE BUTTON LOW");
-    // load high score from EEPROM
-    high_score = eeprom_read_word(high_score_address);
-  }
-
-  // starting state
-  idle();
-}
+StateMachine g_machine = StateMachine();
+State* g_state_idle = g_machine.addState(&s_idle); // being first should make it the default state
+State* g_state_play = g_machine.addState(&s_play);
+State* g_state_end = g_machine.addState(&s_end);
 
 /* Get a LED index that we can light up.
  *  Avoid LEDS that are already lit, as well as LEDS where the associated button is pressed.
@@ -84,9 +73,9 @@ int getRandomUnlitUnpressedIndex() {
   int result = -1; // result of -1 means all lights are lit
   
   size_t unlit_cnt = 0;
-  int unlit_leds[leds_cnt];
-  for (int i = 0; i < leds_cnt; ++i) {
-    if(digitalRead(p1_leds[i]) == LOW && digitalRead(p1_buttons[i]) == LOW){
+  int unlit_leds[g_leds_cnt];
+  for (int i = 0; i < g_leds_cnt; ++i) {
+    if(digitalRead(g_leds[i]) == LOW && digitalRead(g_buttons[i]) == LOW){
       unlit_leds[unlit_cnt] = i;
       ++unlit_cnt;
     }
@@ -97,126 +86,173 @@ int getRandomUnlitUnpressedIndex() {
   return result;
 }
 
-void idle() {
-  playing = false;
-  // high score display
-  Display.begin(MAX_ZONES);
-  Display.setZone(0,0,2);
-  Display.setZone(1,3,3);
-  snprintf(scoreBuffer, scoreBufferLength, "%d", high_score);
-  Display.displayZoneText(1, "Hi", PA_LEFT, 0, 0, PA_PRINT);
-  Display.displayZoneText(0, scoreBuffer, PA_CENTER, 0, 0, PA_PRINT);
-  lowLight();
-  digitalWrite(reset_led, HIGH);
-}
-
 void lowLight() {
-  for (int i = 0; i < leds_cnt; ++i) {
-    digitalWrite(p1_leds[i], LOW);
+  for (int i = 0; i < g_leds_cnt; ++i) {
+    digitalWrite(g_leds[i], LOW);
   }
-}
-
-void startGame() {
-  Serial.println("Start State");
-
-  Display.begin(2);
-  Display.setZone(0,0,1);
-  Display.setZone(1,2,3);
-  
-  lowLight();
-  digitalWrite(reset_led, LOW);
- 
-  p1_score = 0;
-  playing = true;
-  gameStartTime = millis();
-  activation_timestamp = gameStartTime + activation_max;
-}
-
-void endGame() {
-  Serial.println("End Game");
-  playing = false;
-
-  if (p1_score > high_score) {
-    setHiScore(p1_score);
-  } else {
-    
-  }
-  idle();
 }
 
 void setHiScore(int score) {
   Serial.println("Writing High Score");
-  high_score = score;
-  eeprom_write_word(high_score_address, high_score);
+  g_high_score = score;
+  eeprom_write_word(g_high_score_address, g_high_score);
 }
 
 void loop() {
-  unsigned long currentTime = millis();
-  // main game logic
-  if(playing) {
-    // update timer
-    unsigned long counter = currentTime - gameStartTime;
-    if (counter <= gameLength) { // prevent going negative on unsigned, while also checking if the game has ended
-      counter = gameLength - counter;
+  g_machine.run();
+  updateDisplays();
+}
 
-      // see about lighting up a button
-      if (activation_timestamp <= currentTime) {
-        int pin_light = getRandomUnlitUnpressedIndex();
-        if (pin_light >= 0) {
-          digitalWrite(p1_leds[pin_light], HIGH);
-          p1_led_times[pin_light] = currentTime;
-          // set up next timer
-          activation_timestamp = currentTime + random(activation_min, activation_max);
-        } else {
-          // alter timer for faster next attempt
-          activation_timestamp = currentTime + activation_min;
-        }
-      }
-
-      // check button presses
-      for (int i = 0; i < leds_cnt; ++i) {
-        if (digitalRead(p1_buttons[i]) == HIGH && digitalRead(p1_leds[i]) == HIGH) {
-            digitalWrite(p1_leds[i], LOW);
-            p1_score++;
-        } else if (digitalRead(p1_leds[i]) == HIGH && currentTime - p1_led_times[i] >= led_activation_length) {
-          // light timed out. remove it and reduce points
-          digitalWrite(p1_leds[i], LOW);
-          p1_score--;
-          if (p1_score < 0) {
-            p1_score = 0;
-          }
-        }
-      }
-
-      // update displays
-        // timer
-        snprintf(timerBuffer, timerBufferLength, "%d", counter/1000);
-        Display.displayZoneText(1, timerBuffer, PA_CENTER, 0, 0, PA_PRINT);
-  
-        // score
-        snprintf(scoreBuffer, scoreBufferLength, "%d", p1_score);
-        Display.displayZoneText(0, scoreBuffer, PA_RIGHT, 0, 0, PA_PRINT);
-    } else { // game timer finished
-      endGame();
-    }
-  } else {
-    // only reset when releasing the button to prevent multiple calls while held down.
-    if (resetHeld == true && digitalRead(reset_button) == LOW) {
-      resetHeld = false;
-      startGame();
-    } else if (digitalRead(reset_button) == HIGH && !resetHeld) {
-      resetHeld = true;
-    }
-    // TODO idle animation
-  }
-
+void updateDisplays() {
   // regardless if playing or not, update the display windows
-  if (Display.displayAnimate()) {
+  if (g_display.displayAnimate()) {
     for (uint8_t i=0; i<MAX_ZONES; i++) {
-      if (Display.getZoneStatus(i)) {
+      if (g_display.getZoneStatus(i)) {
         // do something with the parameters for the animation then reset it
-        Display.displayReset(i);
+        g_display.displayReset(i);
       }
     }
   }
+}
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println("Setup System");
+  randomSeed(analogRead(A7));
+
+  // setup up pin modes for buttons and LEDs
+  pinMode(g_reset_led, OUTPUT);
+  pinMode(g_reset_button, INPUT);  
+  for (int i = 0; g_leds_cnt > i; i++) {
+    pinMode(g_buttons[i], INPUT);
+    pinMode(g_leds[i], OUTPUT);
+  }
+
+  // hold centre button while turning on to reset the Hi Score
+  if (digitalRead(g_centre_button) == HIGH) {
+    Serial.println("CENTRE BUTTON HIGH");
+    setHiScore(0);
+  } else {
+    Serial.println("CENTRE BUTTON LOW");
+    // load high score from EEPROM
+    g_high_score = eeprom_read_word(g_high_score_address);
+  }
+
+  /*
+  g_state_idle->addTransition(&t_idle_play, g_state_play);
+  g_state_play->addTransition(&t_play_end, g_state_end);
+  g_state_end->addTransition(&t_end_idle, g_state_idle);
+  */
+}
+/*
+bool t_idle_play() {
+  if (start button detected)
+}
+
+bool t_play_end() {
+  if (game timer ends)
+}
+
+bool t_end_idle() {
+  if (end_message_finished)
+}
+*/
+void s_idle() {
+  if(g_machine.executeOnce){
+    Serial.println("State Idle");
+    
+    // high score display
+    g_display.begin(MAX_ZONES);
+    g_display.setZone(0,0,2);
+    g_display.setZone(1,3,3);
+    snprintf(g_score_buffer, g_score_buffer_length, "%d", g_high_score);
+    g_display.displayZoneText(1, "Hi", PA_LEFT, 0, 0, PA_PRINT);
+    g_display.displayZoneText(0, g_score_buffer, PA_CENTER, 0, 0, PA_PRINT);
+    lowLight();
+    digitalWrite(g_reset_led, HIGH);
+  }
+
+  // only reset when releasing the button to prevent multiple calls while held down.
+  if (g_reset_held == true && digitalRead(g_reset_button) == LOW) {
+    Serial.println("RESET BUTTON UP");
+    g_reset_held = false;
+    g_machine.transitionTo(g_state_play);
+  } else if (digitalRead(g_reset_button) == HIGH && !g_reset_held) {
+    Serial.println("RESET BUTTON DOWN");
+    g_reset_held = true;
+  }
+  // TODO idle animation
+}
+
+void s_play() {
+  if (g_machine.executeOnce) {
+    Serial.println("State Play");
+    g_display.begin(2);
+    g_display.setZone(0,0,1);
+    g_display.setZone(1,2,3);
+
+    lowLight();
+    digitalWrite(g_reset_led, LOW);
+ 
+    g_score = 0;
+    playing = true;
+    g_game_start_time = millis();
+    g_activation_timestamp = g_game_start_time + g_activation_max;
+  }
+  unsigned long current_time = millis();
+  // update timer
+  unsigned long counter = current_time - g_game_start_time;
+  if (counter <= g_game_length) { // prevent going negative on unsigned, while also checking if the game has ended
+    counter = g_game_length - counter;
+
+    // see about lighting up a button
+    if (g_activation_timestamp <= current_time) {
+      int pin_light = getRandomUnlitUnpressedIndex();
+      if (pin_light >= 0) {
+        digitalWrite(g_leds[pin_light], HIGH);
+        g_led_times[pin_light] = current_time;
+        // set up next timer
+        g_activation_timestamp = current_time + random(g_activation_min, g_activation_max);
+      } else {
+        // alter timer for faster next attempt
+        g_activation_timestamp = current_time + g_activation_min;
+      }
+    }
+
+    // check button presses
+    for (int i = 0; i < g_leds_cnt; ++i) {
+      if (digitalRead(g_buttons[i]) == HIGH && digitalRead(g_leds[i]) == HIGH) {
+          digitalWrite(g_leds[i], LOW);
+          g_score++;
+      } else if (digitalRead(g_leds[i]) == HIGH && current_time - g_led_times[i] >= g_led_activation_length) {
+        // light timed out. remove it and reduce points
+        digitalWrite(g_leds[i], LOW);
+        g_score--;
+        if (g_score < 0) {
+          g_score = 0;
+        }
+      }
+    }
+
+    // update timer
+    snprintf(g_timer_buffer, g_timer_buffer_length, "%d", counter/1000);
+    g_display.displayZoneText(1, g_timer_buffer, PA_CENTER, 0, 0, PA_PRINT);
+
+    // update score
+    snprintf(g_score_buffer, g_score_buffer_length, "%d", g_score);
+    g_display.displayZoneText(0, g_score_buffer, PA_RIGHT, 0, 0, PA_PRINT);
+  } else { // game timer finished
+    g_machine.transitionTo(g_state_end);
+  }
+}
+
+void s_end() {
+  if (g_machine.executeOnce) {
+    Serial.println("State End");
+    //check if high score needs to be saved
+    if (g_score >= g_high_score) {
+    }
+  }
+  //if (message done)
+  g_machine.transitionTo(g_state_idle);
 }
