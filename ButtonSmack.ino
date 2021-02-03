@@ -51,9 +51,9 @@ void(* resetFunc) (void) = 0;//declare reset function at address 0
 
 MD_Parola g_display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
-int g_reset_led = 7;
-int g_reset_button = A0;
-int g_centre_button = A1; // used to clear EEPROM on startup
+int g_play_led = 7;
+int g_play_button = A0;
+int g_factory_reset_button = g_play_button; // used to clear EEPROM on startup
 
 const int g_leds_cnt = 5;
 int g_leds[g_leds_cnt] = {2,3,4,5,6};
@@ -138,15 +138,15 @@ void setup() {
   randomSeed(analogRead(A7));
 
   // setup up pin modes for buttons and LEDs
-  pinMode(g_reset_led, OUTPUT);
-  pinMode(g_reset_button, INPUT);  
+  pinMode(g_play_led, OUTPUT);
+  pinMode(g_play_button, INPUT);  
   for (int i = 0; g_leds_cnt > i; i++) {
     pinMode(g_buttons[i], INPUT);
     pinMode(g_leds[i], OUTPUT);
   }
 
   // hold centre button while turning on to reset the Hi Score
-  if (digitalRead(g_centre_button) == HIGH) {
+  if (digitalRead(g_factory_reset_button) == HIGH) {
     Serial.println(F("Resetting High Score"));
     setHiScore(0);
   } else {
@@ -175,15 +175,15 @@ void s_idle() {
     g_display.displayZoneText(1, "Hi", PA_LEFT, 0, 0, PA_PRINT);
     g_display.displayZoneText(0, g_score_buffer, PA_CENTER, 0, 0, PA_PRINT);
     lowLight();
-    digitalWrite(g_reset_led, HIGH);
+    digitalWrite(g_play_led, HIGH);
   }
 
   // only reset when releasing the button to prevent multiple calls while held down.
-  if (g_reset_held == true && digitalRead(g_reset_button) == LOW) {
+  if (g_reset_held == true && digitalRead(g_play_button) == LOW) {
     Serial.println(F("Start Button triggered"));
     g_reset_held = false;
     g_machine.transitionTo(g_state_pregame);
-  } else if (digitalRead(g_reset_button) == HIGH && !g_reset_held) {
+  } else if (digitalRead(g_play_button) == HIGH && !g_reset_held) {
     g_reset_held = true;
   }
   // TODO idle animation
@@ -198,7 +198,7 @@ void s_pregame() {
 
     // set the mood
     lowLight();
-    digitalWrite(g_reset_led, LOW);
+    digitalWrite(g_play_led, LOW);
 
     g_state_start_time = current_time;
   }
@@ -225,7 +225,7 @@ void s_play() {
     g_display.setZone(1,2,3);
 
     lowLight();
-    digitalWrite(g_reset_led, LOW);
+    digitalWrite(g_play_led, LOW);
  
     g_score = 0;
     g_state_start_time = current_time;
