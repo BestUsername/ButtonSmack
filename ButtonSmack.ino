@@ -1,8 +1,8 @@
 /* 
  *  -=IMPORTANT LIBRARY INFORMATION=-
  *  MD_Parola:
- *    get from library management or https://github.com/MajicDesigns/MD_Parola
- *  MD_MAX72XX (MD_Parola dependency):
+ *    get from library management (https://github.com/MajicDesigns/MD_Parola)
+ *  MD_MAX72XX:
  *    get from library management
  *  StateMachine:
  *    if you get it from library management, patch according to https://github.com/jrullan/StateMachine/pull/8/files/fc4ca5e9861a15853804068d87880fedaea50da8
@@ -20,6 +20,27 @@
 #include <SPI.h>
 #include <StateMachine.h>
 
+// Some additional helper functions to check free SRAM and reset the device
+#ifdef __arm__
+// should use uinstd.h to define sbrk but Due causes a conflict
+extern "C" char* sbrk(int incr);
+#else  // __ARM__
+extern char *__brkval;
+#endif  // __arm__
+ int freememory() {
+  char top;
+#ifdef __arm__
+  return &top - reinterpret_cast<char*>(sbrk(0));
+#elif defined(CORE_TEENSY) || (ARDUINO > 103 && ARDUINO != 151)
+  return &top - __brkval;
+#else  // __arm__
+  return __brkval ? &top - __brkval : &top - __malloc_heap_start;
+#endif  // __arm__
+}
+void(* resetFunc) (void) = 0;//declare reset function at address 0
+
+
+// Start program
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW
 #define MAX_DEVICES 4 // number of 8x8 panels connected together
 #define MAX_ZONES   2 // Max number of zones to use (each grouping of panels can be split into virtual zones)
@@ -52,8 +73,8 @@ uint16_t* g_high_score_address = 0;
 
 bool g_reset_held = false;
 unsigned long g_state_start_time;
-const unsigned long g_game_length = 30000;
-const unsigned long g_pregame_length = 4000;
+const unsigned long g_game_length = 30000; //30s
+const unsigned long g_pregame_length = 4000; //4s (3-1,go)
 
 const int g_score_buffer_length = 4;
 char g_score_buffer[g_score_buffer_length];
@@ -65,27 +86,6 @@ State* g_state_idle = g_machine.addState(&s_idle); // being first makes it the d
 State* g_state_pregame = g_machine.addState(&s_pregame);
 State* g_state_play = g_machine.addState(&s_play);
 State* g_state_end = g_machine.addState(&s_end);
-
-
-#ifdef __arm__
-// should use uinstd.h to define sbrk but Due causes a conflict
-extern "C" char* sbrk(int incr);
-#else  // __ARM__
-extern char *__brkval;
-#endif  // __arm__
- 
-int freememory() {
-  char top;
-#ifdef __arm__
-  return &top - reinterpret_cast<char*>(sbrk(0));
-#elif defined(CORE_TEENSY) || (ARDUINO > 103 && ARDUINO != 151)
-  return &top - __brkval;
-#else  // __arm__
-  return __brkval ? &top - __brkval : &top - __malloc_heap_start;
-#endif  // __arm__
-}
-
-void(* resetFunc) (void) = 0;//declare reset function at address 0
 
 /* Get a LED index that we can light up.
  *  Avoid LEDS that are already lit, as well as LEDS where the associated button is pressed.
@@ -103,7 +103,7 @@ int getRandomUnlitUnpressedIndex() {
     }
   }
   if (unlit_cnt > 0) {
-    result = random(0,unlit_cnt-1);
+    result = unlit_leds[random(0,unlit_cnt)];
   }
   return result;
 }
@@ -232,7 +232,6 @@ void s_play() {
     g_activation_timestamp = g_state_start_time + g_activation_max;
   }
   
-  // update timer
   unsigned long counter = current_time - g_state_start_time;
   if (counter <= g_game_length) { // prevent going negative on unsigned, while also checking if the game has ended
     counter = g_game_length - counter;
@@ -267,7 +266,7 @@ void s_play() {
     }
 
     // update timer
-    snprintf(g_timer_buffer, g_timer_buffer_length, "%d", counter/1000);
+    snprintf(g_timer_buffer, g_timer_buffer_length, "%d", (counter/1000)+1);
     g_display.displayZoneText(1, g_timer_buffer, PA_CENTER, 0, 0, PA_PRINT);
 
     // update score
