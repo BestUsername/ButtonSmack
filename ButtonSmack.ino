@@ -53,7 +53,7 @@ MD_Parola g_display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
 int g_play_led = 7;
 int g_play_button = A0;
-int g_factory_reset_button = g_play_button; // used to clear EEPROM on startup
+int g_factory_reset_button = A1; // used to clear EEPROM on startup
 
 const int g_leds_cnt = 5;
 int g_leds[g_leds_cnt] = {2,3,4,5,6};
@@ -71,7 +71,7 @@ int g_score = 0;
 uint16_t g_high_score = 0;
 uint16_t* g_high_score_address = 0;
 
-bool g_reset_held = false;
+bool g_play_button_held = false;
 unsigned long g_state_start_time;
 const unsigned long g_game_length = 30000; //30s
 const unsigned long g_pregame_length = 4000; //4s (3-1,go)
@@ -145,6 +145,8 @@ void setup() {
     pinMode(g_leds[i], OUTPUT);
   }
 
+  g_play_button_held = (digitalRead(g_play_button) == HIGH) ? true : false;
+
   // hold centre button while turning on to reset the Hi Score
   if (digitalRead(g_factory_reset_button) == HIGH) {
     Serial.println(F("Resetting High Score"));
@@ -165,7 +167,6 @@ void loop() {
 void s_idle() {
   if(g_machine.executeOnce){
     Serial.println(F("State Idle"));
-    g_reset_held = false; // shouldn't need this, but JIC
     
     // high score display
     g_display.begin(2);
@@ -179,12 +180,12 @@ void s_idle() {
   }
 
   // only reset when releasing the button to prevent multiple calls while held down.
-  if (g_reset_held == true && digitalRead(g_play_button) == LOW) {
+  if (g_play_button_held == true && digitalRead(g_play_button) == LOW) {
     Serial.println(F("Start Button triggered"));
-    g_reset_held = false;
+    g_play_button_held = false;
     g_machine.transitionTo(g_state_pregame);
-  } else if (digitalRead(g_play_button) == HIGH && !g_reset_held) {
-    g_reset_held = true;
+  } else if (digitalRead(g_play_button) == HIGH && !g_play_button_held) {
+    g_play_button_held = true;
   }
   // TODO idle animation
 }
@@ -253,16 +254,16 @@ void s_play() {
     // check button presses
     for (int i = 0; i < g_leds_cnt; ++i) {
       if (digitalRead(g_buttons[i]) == HIGH && digitalRead(g_leds[i]) == HIGH) {
-          digitalWrite(g_leds[i], LOW);
-          g_score++;
+        digitalWrite(g_leds[i], LOW);
+        g_score++;
       } else if (digitalRead(g_leds[i]) == HIGH && current_time - g_led_times[i] >= g_led_activation_length) {
         // light timed out. remove it and reduce points
         digitalWrite(g_leds[i], LOW);
         g_score--;
-        if (g_score < 0) {
-          g_score = 0;
-        }
       }
+    }
+    if (g_score < 0) {
+      g_score = 0;
     }
 
     // update timer
